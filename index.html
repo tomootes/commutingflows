@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="format-detection" content="telephone=no">
+<title>Forenzen visualisatie</title>
+<link rel="stylesheet" type="text/css" href="css/styles.css" media="all">
+<link rel="stylesheet" type="text/css" href="css/jquery.ui.css" media="all">
+<script src="js/jquery.js"></script>
+<script src="js/jquery-ui-1-10-3.js"></script>
+<script src="js/circle.js"></script>
+<script src="js/line.js"></script>
+<script src="data.json"></script>
+<script src="config.js"></script>
+<script src="js/papaparse.js"></script>
+<!--<script src="//code.jquery.com/jquery-1.10.2.js"></script>
+<script src="//code.jquery.com/ui/1.11.2/jquery-ui.js"></script>-->
+</head>
+<body>
+<h1 class="visual-title">Forenzensteden in Nederland</h1>
+<p class="undertitle">Sleep of selecteer een stad om meer inzicht te krijgen, een geselecteerde stad toont de inkomende forenzenstromen.</p>
+<canvas id="canvas"></canvas>
+<div class="legenda">
+<div class="inner-legenda">
+<select id="city">
+<option value="volvo">Volvo</option>
+
+</select>
+
+<p>Stel hier de minimale waarde van de verbindingen in</p>
+<div class="values">
+	<div class="value"><span>1000</span></div>
+	<div class="value"><span>2000</span></div>
+	<div class="value"><span>3000</span></div>
+	<div class="value"><span>4000</span></div>
+	<div class="value"><span>5000</span></div>
+	<div class="value"><span>6000</span></div>
+	<div class="value"><span>7000</span></div>
+	<div class="value"><span>8000</span></div>
+	<div class="value"><span>9000</span></div>
+	<div class="lastValue"><span>10000</span></div>
+</div>
+<div class="slider-holder">
+	<div id="slider"></div>
+</div>
+</div>
+</div>
+<script>
+
+$(document).ready(function(){
+var minConnectValue = 3;
+var flowDirection = "out";
+var dragIndex = 13;
+
+$('#city').change(function() {
+dragIndex = $(this).val();
+});
+
+///////////////////////////////////////////////////////////
+/// THIS IS WHERE cities{} is filled
+///////////////////////////////////////////////////////////
+
+$(function(){
+	$("#slider").slider({
+		range: "min",
+		value: minConnectValue,
+		min: 1,
+		max: 10,
+		slide: function(event, ui){
+			minConnectValue = ui.value;
+			initCanvas(minConnectValue);
+		}
+	});
+});
+
+// []
+initCanvas(minConnectValue);
+
+// Init zeh canvas 
+function initCanvas(minConnectValue, ctx, canvas){
+
+var myNode = document.getElementById("city");
+while (myNode.firstChild) {
+	myNode.removeChild(myNode.firstChild);
+}
+
+var cWidth = window.innerWidth - 20;
+var cHeight = 550;
+var xMiddle = cWidth/ 2 ;
+var yMiddle = cHeight/ 2 ;
+var dragging;
+var mouseOver;
+var citySizeVal = "out";
+var mouseX;
+var mouseY;
+var dragHoldX;
+var dragHoldY;
+var circles = [];
+var lines = [];
+var linesSelectedCircle = [];
+var minRadiusCircle = 2;
+var lineWidth = 1;
+var i = 0;
+var updatedConnections = [];
+
+var canvas = document.getElementById('canvas');
+var ctx = canvas.getContext('2d');	
+
+// Update connections by minimal value
+for(i=0;i<cities.links.length;i++){
+	if(cities.links[i].value > minConnectValue && cities.links[i].target != cities.links[i].source){
+		updatedConnections.push(cities.links[i]);
+	}
+}
+
+init(updatedConnections);
+
+ctx.canvas.width  = cWidth;
+ctx.canvas.height = cHeight;
+
+function init(updatedConnections){
+	drawCities();
+	drawLines(updatedConnections);
+
+	canvas.addEventListener("mousemove", mouseOverListener, false);
+	canvas.addEventListener("mousedown", mouseDownListener, false);
+}
+
+function getMousePos(canvas, evt) {
+	var rect = canvas.getBoundingClientRect();
+	return {
+		x: evt.clientX - rect.left,
+		y: evt.clientY - rect.top
+	};
+}
+
+function hasConnections(ci, updatedConnections){
+	var r;
+	for(var a = 0; a < updatedConnections.length; a++){
+		if(updatedConnections[a].source == ci || updatedConnections[a].target == ci){
+			r = true;
+			break;
+		}else{
+			r = false;
+		}
+	}
+	return r;
+}
+
+// Do this when
+function mouseOverListener(evt){
+
+	var mousePos = getMousePos(canvas, evt);
+	mouseX = mousePos.x;
+	mouseY = mousePos.y;
+
+	for(var i = 0; i < circles.length; i++) {
+		circles[i].show_text = circles[i].checkIfHover(mousePos)
+		}
+
+
+	for(var i = 0; i < circles.length; i++) {
+		if(circles[i].checkIfHover(mousePos) && circles[i].hc == true){
+			$("body").addClass("pointer");
+			return
+		}else{
+			$("body").removeClass("pointer");
+		}
+	}
+}
+
+// Check if mouse moves
+function mouseDownListener(evt){
+	var mousePos = getMousePos(canvas, evt);
+	mouseX = mousePos.x;
+	mouseY = mousePos.y;
+
+	var highestIndex = -1;
+
+	for(var i = 0; i < circles.length; i++) {
+		if( circles[i].checkIfHover(mousePos) ){
+			dragging = true;
+			if (i > highestIndex) {
+				//We will pay attention to the point on the object where the mouse is "holding" the object:
+				dragHoldX = mouseX - circles[i].x;
+				dragHoldY = mouseY - circles[i].y;
+				highestIndex = i;
+				dragIndex = i;
+			}
+		}
+	}
+
+	if (dragging) {
+		window.addEventListener("mousemove", mouseMoveListener, false);
+	}
+	canvas.removeEventListener("mousedown", mouseDownListener, false);
+	window.addEventListener("mouseup", mouseUpListener, false);
+
+	//code below prevents the mouse down from having an effect on the main browser window:
+	if (evt.preventDefault) {
+		evt.preventDefault();
+	} //standard
+	else if (evt.returnValue) {
+		evt.returnValue = false;
+	} //older IE
+	return false;
+}
+
+function mouseUpListener(evt) {
+	canvas.addEventListener("mousedown", mouseDownListener, false);
+	window.removeEventListener("mouseup", mouseUpListener, false);
+	if (dragging) {
+		dragging = false;
+		window.removeEventListener("mousemove", mouseMoveListener, false);
+	}
+}
+
+function mouseMoveListener(evt){
+	var posX;
+	var posY;
+
+	var mousePos = getMousePos(canvas, evt);
+	mouseX = mousePos.x;
+	mouseY = mousePos.y;
+
+	//clamp x and y positions to prevent object from dragging outside of canvas
+	posX = mouseX - dragHoldX;
+	posY = mouseY - dragHoldY;
+
+	circles[dragIndex].x = posX;
+	circles[dragIndex].y = posY;
+}
+
+function drawCities(){
+	$('#city').append('<option value="" disabled selected>Selecteer een stad</option>');
+	for(i=0;i<cities.nodes.length;i++){
+		var hc = hasConnections(i,updatedConnections);
+
+		var d = (Math.random() * (0 - 6.28318530718) + 6.28318530718).toFixed(4);
+		var items = 4;
+
+		x0 = xMiddle;
+		y0 = yMiddle;
+
+		r = 250 - cities.nodes[i].total;
+
+		var x = x0 + r * Math.cos(2 * Math.PI * i / cities.nodes.length);
+		var y = y0 + r * Math.sin(2 * Math.PI * i / cities.nodes.length);
+
+		var dx = (x * Math.cos(d)) - (y * Math.sin(d))
+		var dy = (x * Math.cos(d)) + (y * Math.sin(d))
+
+		var cx = Math.floor(Math.random() * cWidth - 20);
+		var cy = Math.floor(Math.random() * cHeight - 20); 
+
+		// Check if city has connections 
+		if(hc == true){
+			var item = '<option value="' + i +'">' + cities.nodes[i].name + '</option>'
+			$('#city').append(item);
+		}
+		
+		// create new circle 
+		var c = new Circle(x, y, cities.nodes[i].total, "#000000", cities.nodes[i].name, minRadiusCircle,i,hc);
+		circles.push(c);
+	}
+}
+
+function drawLines(updatedConnections){
+	drawLegenda();
+	for(i=0;i<updatedConnections.length;i++){
+		var connections = updatedConnections;
+		var source = connections[i].source;
+		var target = connections[i].target;
+
+		var valfloat = parseFloat(connections[i].value);
+		circles[target].addIngoing(valfloat);
+
+		var l = new Line(source,target,connections[i].value,circles,"rgba(0,0,0,0.3)");
+		lines.push(l);
+	}
+}
+
+function drawLegenda(){
+	var legendaY = 360;
+	var legendaX = 1;
+	var paddingTop = 10;
+	var paddingLeft = 10;
+	legendaWidth = 200;
+	legendaHeight = 185;
+
+	ctx.save();
+	ctx.strokeStyle = "rgb(0,0,0)";
+	ctx.strokeRect(legendaX,legendaY, legendaWidth, legendaHeight);
+	ctx.restore();
+
+	var title = "Legenda"
+	ctx.font = "18px Arial";
+	ctx.fillStyle = 'black';		
+	ctx.textBaseline = 'top';
+	ctx.fillText(title, legendaX + paddingLeft, legendaY + paddingTop);
+
+	var title = "Uitgaande forenzen"
+	ctx.fillStyle = 'black';		
+	ctx.font = "14px Arial";
+	ctx.textBaseline = 'top';
+	ctx.fillText(title, legendaX + paddingLeft + 0, legendaY + paddingTop + 22);
+
+	var numberCircles = 4;
+
+	for(i=0;i<numberCircles;i++){
+		x = legendaX + 20;
+		y = legendaY +(32 * i) + 65;
+		var total = 8 + (i*70);
+		var radius = Math.sqrt(total);
+
+		ctx.beginPath();
+		ctx.arc(x, y, radius + minRadiusCircle, 0, 2 * Math.PI, false);
+		ctx.fillStyle = 'black';
+		ctx.strokeStyle = 'white';
+		ctx.fill();
+		ctx.lineWidth = 1;
+		ctx.stroke();
+
+		ctx.save();
+		ctx.font = "12px Arial";
+		var txt = formatNumber(total * 1000);
+		ctx.fillStyle = 'rgb(218, 218, 218)';
+		var width = ctx.measureText(txt).width + 20;
+
+		/// draw background rect assuming height of font
+		ctx.fillStyle = '#000';
+		ctx.lineWidth = 1;
+		ctx.fillText(txt, x + 22, y - 6);
+		ctx.restore();
+	}
+
+	var numberLines = 4;
+	for(i=0;i<numberCircles;i++){
+		x = legendaX + 100;
+		y = legendaY +(32 * i) + 65;
+		var total = 2 + (i*6);
+		var radius = Math.sqrt(total);
+
+		ctx.beginPath();
+	ctx.moveTo(x, y);
+	ctx.lineTo(x + 80, y);
+	ctx.lineWidth = total;
+	ctx.strokeStyle = "rgba(110, 177, 134,0.8)";
+	ctx.stroke();
+
+		ctx.save();
+		ctx.font = "12px Arial";
+		var txt = formatNumber(total * 1000);
+		ctx.fillStyle = 'rgb(218, 218, 218)';
+		var width = ctx.measureText(txt).width + 20;
+		/// draw background rect assuming height of font
+		ctx.fillStyle = '#000';
+		ctx.lineWidth = 1;
+		ctx.fillText(txt, x + 20, y - 6);
+		ctx.restore();
+	}
+}
+
+
+// animation loop
+function loop(){
+	ctx.clearRect(0,0,cWidth,cHeight);
+	linesSelectedCircle = [];
+	fellowsSelectedCircle = [];
+
+	drawLegenda();
+
+	for(var i = 0; i < lines.length; i++) {
+		lines[i].update();
+		lines[i].draw(ctx, minRadiusCircle, dragIndex, flowDirection);
+		if(dragIndex == lines[i].target){
+				fellowsSelectedCircle.push(lines[i].source);
+				linesSelectedCircle.push(i);
+			}
+		fellowsSelectedCircle.push(lines[i].target); 
+	}
+
+	for(var i = 0; i < circles.length; i++){
+		if(circles[i].hc == true){
+		circles[i].update();
+		circles[i].draw(ctx, minRadiusCircle, dragIndex);
+		}
+	}
+
+	for(var i = 0; i < linesSelectedCircle.length; i++){
+		var l = linesSelectedCircle[i];
+		lines[l].draw(ctx, dragIndex);
+	}
+
+	for(var i = 0; i < fellowsSelectedCircle.length; i++){
+		var c = fellowsSelectedCircle[i];
+		circles[c].draw(ctx, minRadiusCircle, dragIndex);
+	}
+	
+	for(var i = 0; i < circles.length; i++){
+		if(circles[i].show_text == true && circles[i].hc == true){
+			circles[i].drawLabel(ctx);
+		}
+	}
+requestAnimationFrame(loop);
+}
+
+// start the loop
+loop();
+
+}
+
+});
+
+</script>
+</body>
+</html>
